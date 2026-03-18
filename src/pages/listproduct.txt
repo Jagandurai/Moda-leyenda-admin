@@ -1,0 +1,448 @@
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import { backendURL } from "../constants";
+import { toast } from "react-toastify";
+import { FaTrash, FaEdit, FaCheck, FaMinus, FaPlus } from "react-icons/fa";
+
+const ListProduct = ({ token: propToken }) => {
+  const token = propToken || localStorage.getItem("token");
+  const authHeaders = { token, Authorization: `Bearer ${token}` };
+
+  const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
+
+  const [editingPriceId, setEditingPriceId] = useState(null);
+  const [tempPrice, setTempPrice] = useState(0);
+
+  // 🔍 FILTER STATES
+  const [searchCategory, setSearchCategory] = useState("");
+  const [searchSubCategory, setSearchSubCategory] = useState("");
+  const [searchProductId, setSearchProductId] = useState("");
+  const [sortOrder, setSortOrder] = useState("latest");
+
+  /* ---------------- FETCH PRODUCTS ---------------- */
+  const fetchProducts = async () => {
+    try {
+      const res = await axios.get(`${backendURL}/api/product/list`);
+      if (res.data.success) {
+        const updated = res.data.products.map((p) => ({
+          ...p,
+          fewItemsLeft: Boolean(p.fewItemsLeft),
+          bestseller: Boolean(p.bestseller),
+          inStock: p.inStock !== false,
+          productCode: p.productCode || "",
+        }));
+        setProducts(updated);
+        setFilteredProducts(updated);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load products");
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  /* ---------------- FILTER + SORT ---------------- */
+  useEffect(() => {
+    let updated = [...products];
+
+    if (searchCategory) {
+      updated = updated.filter(
+        (item) => item.category === searchCategory
+      );
+    }
+
+    if (searchSubCategory) {
+      updated = updated.filter(
+        (item) => item.subCategory === searchSubCategory
+      );
+    }
+
+    if (searchProductId.trim() !== "") {
+      updated = updated.filter((item) =>
+        item.productCode
+          ?.toLowerCase()
+          .includes(searchProductId.toLowerCase())
+      );
+    }
+
+    if (sortOrder === "latest") {
+      updated.sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      );
+    } else {
+      updated.sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+      );
+    }
+
+    setFilteredProducts(updated);
+  }, [
+    products,
+    searchCategory,
+    searchSubCategory,
+    searchProductId,
+    sortOrder,
+  ]);
+
+  /* ---------------- TOGGLE FEW ITEMS ---------------- */
+  const toggleFewItemsLeft = async (product) => {
+    try {
+      const newStatus = !product.fewItemsLeft;
+
+      const res = await axios.post(
+        `${backendURL}/api/product/toggle-few-items`,
+        { productId: product._id, status: newStatus },
+        { headers: authHeaders }
+      );
+
+      if (res.data.success) {
+        setProducts((prev) =>
+          prev.map((p) =>
+            p._id === product._id
+              ? { ...p, fewItemsLeft: newStatus }
+              : p
+          )
+        );
+        toast.success("Few Items updated");
+      }
+    } catch {
+      toast.error("Update failed");
+    }
+  };
+
+  /* ---------------- TOGGLE BESTSELLER ---------------- */
+  const toggleBestseller = async (product) => {
+    try {
+      const newStatus = !product.bestseller;
+
+      const res = await axios.post(
+        `${backendURL}/api/product/toggle-bestseller`,
+        { productId: product._id, status: newStatus },
+        { headers: authHeaders }
+      );
+
+      if (res.data.success) {
+        setProducts((prev) =>
+          prev.map((p) =>
+            p._id === product._id
+              ? { ...p, bestseller: newStatus }
+              : p
+          )
+        );
+        toast.success("Bestseller updated");
+      }
+    } catch {
+      toast.error("Update failed");
+    }
+  };
+
+  /* ---------------- TOGGLE IN STOCK ---------------- */
+  const toggleInStock = async (product) => {
+    try {
+      const newStatus = !product.inStock;
+
+      const res = await axios.post(
+        `${backendURL}/api/product/toggle-instock`,
+        { productId: product._id, status: newStatus },
+        { headers: authHeaders }
+      );
+
+      if (res.data.success) {
+        setProducts((prev) =>
+          prev.map((p) =>
+            p._id === product._id
+              ? {
+                  ...p,
+                  inStock: newStatus,
+                  fewItemsLeft: newStatus ? p.fewItemsLeft : false,
+                }
+              : p
+          )
+        );
+        toast.success("Stock updated");
+      }
+    } catch {
+      toast.error("Update failed");
+    }
+  };
+
+  /* ---------------- DELETE PRODUCT ---------------- */
+  const deleteProduct = async (productId) => {
+    if (!window.confirm("Delete this product?")) return;
+
+    try {
+      const res = await axios.post(
+        `${backendURL}/api/product/remove`,
+        { id: productId },
+        { headers: authHeaders }
+      );
+
+      if (res.data.success) {
+        setProducts((prev) =>
+          prev.filter((p) => p._id !== productId)
+        );
+        toast.success("Product deleted");
+      }
+    } catch {
+      toast.error("Delete failed");
+    }
+  };
+
+  /* ---------------- PRICE EDIT ---------------- */
+  const startEditPrice = (product) => {
+    setEditingPriceId(product._id);
+    setTempPrice(product.price.discounted);
+  };
+
+  const savePrice = async (productId) => {
+    try {
+      const res = await axios.post(
+        `${backendURL}/api/product/update-price`,
+        { productId, price: tempPrice },
+        { headers: authHeaders }
+      );
+
+      if (res.data.success) {
+        setProducts((prev) =>
+          prev.map((p) =>
+            p._id === productId
+              ? { ...p, price: { ...p.price, discounted: tempPrice } }
+              : p
+          )
+        );
+        setEditingPriceId(null);
+        toast.success("Price updated");
+      }
+    } catch {
+      toast.error("Price update failed");
+    }
+  };
+
+  /* ---------------- SHORTEN PRODUCT NAME ---------------- */
+  const formatName = (name) => {
+    if (name.length > 20) {
+      return name.slice(0, 20) + "...";
+    }
+    return name;
+  };
+
+  return (
+    <div className="p-4 sm:p-6">
+      <h2 className="text-xl sm:text-2xl font-bold mb-4">
+        Product List
+      </h2>
+
+      {/* 🔍 FILTER SECTION */}
+      <div className="bg-white p-4 rounded-xl shadow mb-4 flex flex-col sm:flex-row gap-3 flex-wrap">
+        <select
+          value={searchCategory}
+          onChange={(e) => setSearchCategory(e.target.value)}
+          className="border px-3 py-2 rounded-lg text-sm"
+        >
+          <option value="">All Category</option>
+          <option value="Men">Men</option>
+          <option value="Women">Women</option>
+          <option value="Kids">Kids</option>
+        </select>
+
+        <select
+          value={searchSubCategory}
+          onChange={(e) => setSearchSubCategory(e.target.value)}
+          className="border px-3 py-2 rounded-lg text-sm"
+        >
+          <option value="">All Type</option>
+          <option value="Topwear">Topwear</option>
+          <option value="Bottomwear">Bottomwear</option>
+          <option value="Sportswear">Sportswear</option>
+        </select>
+
+        <input
+          type="text"
+          placeholder="Search Product ID"
+          value={searchProductId}
+          onChange={(e) =>
+            setSearchProductId(e.target.value)
+          }
+          className="border px-3 py-2 rounded-lg text-sm flex-1"
+        />
+
+        <select
+          value={sortOrder}
+          onChange={(e) => setSortOrder(e.target.value)}
+          className="border px-3 py-2 rounded-lg text-sm"
+        >
+          <option value="latest">Latest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </div>
+
+      {/* TABLE */}
+      <div className="overflow-x-auto bg-white rounded-xl shadow">
+        <table className="min-w-full text-xs sm:text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">ID</th>
+              <th className="p-2">Image</th>
+              <th className="p-2">Name</th>
+              <th className="p-2">Category</th>
+              <th className="p-2">Sub</th>
+              <th className="p-2">Price</th>
+              <th className="p-2">Few</th>
+              <th className="p-2">Best</th>
+              <th className="p-2">Stock</th>
+              <th className="p-2">Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filteredProducts.map((product) => (
+              <tr key={product._id} className="border-b">
+                <td className="p-2 text-center font-mono text-[10px]">
+                  {product.productCode}
+                </td>
+
+                <td className="p-2">
+                  <img
+                    src={product.image?.[0]}
+                    alt=""
+                    className="w-10 h-10 object-cover rounded"
+                  />
+                </td>
+
+                <td className="p-2 break-words max-w-[120px]">
+                  {formatName(product.name)}
+                </td>
+
+                <td className="p-2">{product.category}</td>
+                <td className="p-2">{product.subCategory}</td>
+
+                <td className="p-2">
+                  {editingPriceId === product._id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() =>
+                          setTempPrice((p) => Math.max(0, p - 10))
+                        }
+                      >
+                        <FaMinus />
+                      </button>
+
+                      <input
+                        type="number"
+                        value={tempPrice}
+                        onChange={(e) =>
+                          setTempPrice(Number(e.target.value))
+                        }
+                        className="w-16 border rounded text-center"
+                      />
+
+                      <button
+                        onClick={() =>
+                          setTempPrice((p) => p + 10)
+                        }
+                      >
+                        <FaPlus />
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          savePrice(product._id)
+                        }
+                      >
+                        <FaCheck className="text-green-600" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      ₹{product.price.discounted}
+                      <button
+                        onClick={() =>
+                          startEditPrice(product)
+                        }
+                      >
+                        <FaEdit className="text-blue-600" />
+                      </button>
+                    </div>
+                  )}
+                </td>
+
+                <td className="p-2 text-center">
+                  <button
+                    onClick={() =>
+                      toggleFewItemsLeft(product)
+                    }
+                    className={`px-2 py-1 rounded text-white text-xs ${
+                      product.fewItemsLeft
+                        ? "bg-red-600"
+                        : "bg-green-600"
+                    }`}
+                  >
+                    {product.fewItemsLeft
+                      ? "Remove"
+                      : "Add"}
+                  </button>
+                </td>
+
+                <td className="p-2 text-center">
+                  <button
+                    onClick={() =>
+                      toggleBestseller(product)
+                    }
+                    className={`px-2 py-1 rounded text-white text-xs ${
+                      product.bestseller
+                        ? "bg-yellow-600"
+                        : "bg-gray-500"
+                    }`}
+                  >
+                    {product.bestseller
+                      ? "Remove"
+                      : "Add"}
+                  </button>
+                </td>
+
+                <td className="p-2 text-center">
+                  <button
+                    onClick={() =>
+                      toggleInStock(product)
+                    }
+                    className={`px-2 py-1 rounded text-white text-xs ${
+                      product.inStock
+                        ? "bg-green-600"
+                        : "bg-red-600"
+                    }`}
+                  >
+                    {product.inStock
+                      ? "In"
+                      : "Out"}
+                  </button>
+                </td>
+
+                <td className="p-2 text-center">
+                  <button
+                    onClick={() =>
+                      deleteProduct(product._id)
+                    }
+                  >
+                    <FaTrash className="text-red-600" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {filteredProducts.length === 0 && (
+          <p className="text-center py-6 text-gray-500">
+            No products found
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ListProduct;

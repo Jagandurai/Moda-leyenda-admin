@@ -1,0 +1,384 @@
+/* eslint-disable react/prop-types */
+import { useState, useEffect } from "react";
+import { assets } from "../assets/assets.js";
+import axios from "axios";
+import { backendURL } from "../constants.js";
+import { toast } from "react-toastify";
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+
+const AddProduct = ({ token: propToken }) => {
+  const token = propToken || localStorage.getItem("token");
+  const [images, setImages] = useState([null, null, null, null]);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("Men");
+  const [subCategory, setSubCategory] = useState("Topwear");
+  const [type, setType] = useState(""); // ✅ New Type
+  const [sizes, setSizes] = useState([]);
+  const [fewItemsLeft, setFewItemsLeft] = useState(false);
+  const [bestseller, setBestseller] = useState(false);
+  const [originalPrice, setOriginalPrice] = useState("");
+  const [discountPrice, setDiscountPrice] = useState("");
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [productCode, setProductCode] = useState("");
+
+  /* -------------------- Category Data -------------------- */
+  const categories = {
+    Men: {
+      Topwear: [
+        "T-shirts","Shirts","Oversized T-shirts","Classic Fit T-shirts",
+        "Half Sleeve T-shirts","Printed T-shirts","Plain T-shirts","Pull Size Topwear",
+        "Customize T-shirts","Hoodies","Sweatshirts","Jackets","Sweaters","Windcheaters","Full Sleeve T-shirts"
+      ],
+      Bottomwear: [
+        "Joggers","Trackpants","Jeans","Shorts","Boxers","Plus Size Bottom","Cargo",
+        "Cargo Joggers","Cargo Pants","Parachute Pants","Baggy Jeans","Straight Fit Jeans","Baggy Pants"
+      ],
+      // Winterwear: ["Hoodies","Sweatshirts","Jackets","Sweaters","Windcheaters"],
+      Sportswear: ["Tracksuits","Gym Tees","Shorts"]
+    },
+    Women: {
+      Topwear: [
+        "T-shirts","Oversized T-shirts","Classic Fit Shirts","Half Sleeve T-shirts","Printed T-shirts",
+        "Plain T-shirts","Fashion Tops","Hoodies","Sweatshirts","Jackets","Sweaters",
+        "Customize T-shirts","Windcheaters","Full Sleeve T-shirts"
+      ],
+      Bottomwear: [
+        "Joggers","Track Pants","Trousers & Pants","Jeans","Plus Size Bottom","Cargos",
+        "Cargo Joggers","Cargo Pants","Korean Pants","Parachute Pants","Wide Leg Jeans","Baggy Pants","Straight Fit Jeans"
+      ],
+      // Winterwear: ["Hoodies","Sweatshirts","Jackets","Sweaters","Windcheaters"],
+      Sportswear: ["Tracksuits","Gym Tees","Leggings","Shorts"]
+    },
+    Kids: {
+      Topwear: ["T-shirts","Hoodies","Sweatshirts","Tops"],
+      Bottomwear: ["Jeans","Shorts","Leggings","Trousers"],
+      // Winterwear: ["Jackets","Sweaters","Cardigans"],
+      Sportswear: ["Tracksuits","Sports Tees","Shorts"]
+    }
+  };
+
+  /* -------------------- Helpers -------------------- */
+  const calculateDiscount = (mrp, selling) => {
+    const original = Number(mrp);
+    const discounted = Number(selling);
+    if (!original || !discounted || discounted >= original) return 0;
+    return Math.round(((original - discounted) / original) * 100);
+  };
+
+  const handleImage = (file, index) => {
+    if (!file) return;
+    if (file.size > MAX_IMAGE_SIZE) {
+      toast.error("Image must be under 10MB");
+      return;
+    }
+    const updated = [...images];
+    updated[index] = file;
+    setImages(updated);
+  };
+
+  /* -------------------- Update Type Dropdown on Category/Subcategory -------------------- */
+  const [typeOptions, setTypeOptions] = useState([]);
+
+  useEffect(() => {
+    if (category && subCategory && categories[category][subCategory]) {
+      setTypeOptions(categories[category][subCategory]);
+      setType(""); // reset selected type when category/sub changes
+    }
+  }, [category, subCategory]);
+
+  /* -------------------- Submit -------------------- */
+  const onSubmitHandler = async (e) => {
+    e.preventDefault();
+
+    if (!images.some(Boolean)) {
+      toast.error("At least one image is required");
+      return;
+    }
+
+    if (!token) {
+      toast.error("User is not authorized. Login again.");
+      return;
+    }
+
+    if (Number(discountPrice) > Number(originalPrice)) {
+      toast.error("Discount price cannot exceed MRP");
+      return;
+    }
+
+    if (!type) {
+      toast.error("Please select a type");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+
+      formData.append("name", name.trim());
+      formData.append("description", description.trim());
+      formData.append("category", category);
+      formData.append("subCategory", subCategory);
+      formData.append("type", type);
+      formData.append("sizes", JSON.stringify(sizes));
+      formData.append("fewItemsLeft", fewItemsLeft);
+      formData.append("bestseller", bestseller);
+
+      formData.append(
+        "price",
+        JSON.stringify({
+          original: Number(originalPrice),
+          discounted: Number(discountPrice),
+          discountPercent: Number(discountPercent),
+        })
+      );
+
+      images.forEach((img, i) => {
+        if (img) formData.append(`image${i + 1}`, img);
+      });
+
+      // ✅ Console log for debugging
+      console.log("Submitting Product:", {
+        name,
+        description,
+        category,
+        subCategory,
+        type,
+        sizes,
+        fewItemsLeft,
+        bestseller,
+        originalPrice,
+        discountPrice,
+        discountPercent,
+        images,
+      });
+
+      const loadingToast = toast.loading("Uploading product...");
+
+      const res = await axios.post(`${backendURL}/api/product/add`, formData, {
+        headers: { token: token },
+      });
+
+      toast.dismiss(loadingToast);
+
+      if (res.data.success) {
+        toast.success(res.data.message);
+
+        // ✅ Display generated product code
+        setProductCode(res.data.product.productCode);
+
+        // Reset form
+        setName("");
+        setDescription("");
+        setOriginalPrice("");
+        setDiscountPrice("");
+        setDiscountPercent(0);
+        setSizes([]);
+        setImages([null, null, null, null]);
+        setFewItemsLeft(false);
+        setBestseller(false);
+        setType("");
+      } else {
+        toast.error(res.data.message);
+      }
+    } catch (error) {
+      toast.dismiss();
+      if (error.response?.status === 401) {
+        toast.error("Unauthorized. Please login again.");
+      } else {
+        toast.error("Something went wrong");
+      }
+    }
+  };
+
+  /* -------------------- UI -------------------- */
+      return (
+  <div className="w-full min-h-screen bg-gray-100">
+    <form
+      onSubmit={onSubmitHandler}
+      className="w-full px-1 sm:px-8 lg:px-12 py-8"
+    >
+      <div className="w-full p-2 sm:p-8 lg:p-10 rounded-xl shadow-sm flex flex-col gap-6">
+
+        {/* ---------------- Upload Images ---------------- */}
+        <div>
+          <p className="font-semibold mb-4 text-lg">Upload Images</p>
+          <div className="flex gap-4 flex-wrap">
+            {images.map((img, i) => (
+              <label key={i} className="cursor-pointer">
+                <img
+                  className="w-24 h-24 sm:w-28 sm:h-28 object-cover border rounded-lg hover:shadow-md transition"
+                  src={img ? URL.createObjectURL(img) : assets.upload_area}
+                  alt="upload"
+                />
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={(e) => handleImage(e.target.files[0], i)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* ---------------- Name ---------------- */}
+        <input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Product Name"
+          className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+        />
+
+        {/* ---------------- Description ---------------- */}
+        <textarea
+          required
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Product Description"
+          className="border px-4 py-3 rounded-lg min-h-[120px] w-full focus:outline-none focus:ring-2 focus:ring-black"
+        />
+
+        {/* ---------------- Category / SubCategory / Type ---------------- */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+          >
+            <option>Men</option>
+            <option>Women</option>
+            <option>Kids</option>
+          </select>
+
+          <select
+            value={subCategory}
+            onChange={(e) => setSubCategory(e.target.value)}
+            className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+          >
+            {Object.keys(categories[category]).map((sub) => (
+              <option key={sub}>{sub}</option>
+            ))}
+          </select>
+
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+          >
+            <option value="">Select Type</option>
+            {typeOptions.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* ---------------- Pricing ---------------- */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <input
+            type="number"
+            required
+            placeholder="MRP"
+            value={originalPrice}
+            onChange={(e) => {
+              setOriginalPrice(e.target.value);
+              setDiscountPercent(
+                calculateDiscount(e.target.value, discountPrice)
+              );
+            }}
+            className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+          />
+
+          <input
+            type="number"
+            required
+            placeholder="Discount Price"
+            value={discountPrice}
+            onChange={(e) => {
+              setDiscountPrice(e.target.value);
+              setDiscountPercent(
+                calculateDiscount(originalPrice, e.target.value)
+              );
+            }}
+            className="border px-4 py-3 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-black"
+          />
+
+          <input
+            disabled
+            value={`${discountPercent}%`}
+            className="border px-4 py-3 rounded-lg w-full bg-gray-100"
+          />
+        </div>
+
+        {/* ---------------- Sizes ---------------- */}
+        <div>
+          <p className="font-semibold mb-3">Available Sizes</p>
+          <div className="flex gap-3 flex-wrap">
+            {["S", "M", "L", "XL", "XXL"].map((size) => (
+              <span
+                key={size}
+                onClick={() =>
+                  setSizes((prev) =>
+                    prev.includes(size)
+                      ? prev.filter((s) => s !== size)
+                      : [...prev, size]
+                  )
+                }
+                className={`px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                  sizes.includes(size)
+                    ? "bg-black text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+              >
+                {size}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* ---------------- Flags ---------------- */}
+        <div className="flex flex-col sm:flex-row gap-4 sm:gap-10">
+          <label className="flex gap-3 items-center">
+            <input
+              type="checkbox"
+              checked={fewItemsLeft}
+              onChange={() => setFewItemsLeft((p) => !p)}
+              className="w-4 h-4"
+            />
+            Few Items Left
+          </label>
+
+          <label className="flex gap-3 items-center">
+            <input
+              type="checkbox"
+              checked={bestseller}
+              onChange={() => setBestseller((p) => !p)}
+              className="w-4 h-4"
+            />
+            Bestseller
+          </label>
+        </div>
+
+        {/* ---------------- Product Code ---------------- */}
+        {productCode && (
+          <p className="text-green-600 font-semibold bg-green-50 p-3 rounded-lg">
+            Generated Product Code: {productCode}
+          </p>
+        )}
+
+        {/* ---------------- Submit Button ---------------- */}
+        <button
+          type="submit"
+          className="bg-black text-white py-3 rounded-lg w-full sm:w-56 hover:opacity-90 transition"
+        >
+          ADD PRODUCT
+        </button>
+
+      </div>
+    </form>
+  </div>
+);
+};
+
+export default AddProduct;
